@@ -36,6 +36,7 @@ TraversabilityEstimation::TraversabilityEstimation(ros::NodeHandle& nodeHandle)
   submapClient_ = nodeHandle_.serviceClient<grid_map_msgs::GetGridMap>(submapServiceName_);
 
   if (!updateDuration_.isZero()) {
+    //ROS_DEBUG("creating updateTimer with duration %f ", updateDuration_.toSec());
     updateTimer_ = nodeHandle_.createTimer(updateDuration_, &TraversabilityEstimation::updateTimerCallback, this);
   } else {
     ROS_WARN("Update rate is zero. No traversability map will be published.");
@@ -201,23 +202,38 @@ bool TraversabilityEstimation::updateServiceCallback(grid_map_msgs::GetGridMapIn
 
 bool TraversabilityEstimation::updateTraversability() {
   grid_map_msgs::GridMap elevationMap;
+  //ROS_DEBUG("updateTraversability called ");
   if (!getImageCallback_) {
     ROS_DEBUG("Sending request to %s.", submapServiceName_.c_str());
     if (!submapClient_.waitForExistence(ros::Duration(2.0))) {
+      //ROS_DEBUG("FAILED request to %s.", submapServiceName_.c_str());
       return false;
     }
     ROS_DEBUG("Sending request to %s.", submapServiceName_.c_str());
     if (requestElevationMap(elevationMap)) {
+      //ROS_DEBUG("elevationMap received");
       traversabilityMap_.setElevationMap(elevationMap);
-      if (!traversabilityMap_.computeTraversability()) return false;
+      //ROS_DEBUG("computeTraversability called...");
+      if (!traversabilityMap_.computeTraversability()) 
+      {
+        //ROS_DEBUG("COULD NOT compute traversability");
+        return false;
+      }
+      //ROS_DEBUG("traversability computed");
     } else {
+      //ROS_WARN("Failed to retrieve elevation grid map.");
       ROS_WARN_THROTTLE(periodThrottledConsoleMessages, "Failed to retrieve elevation grid map.");
       return false;
     }
   } else {
-    if (!traversabilityMap_.computeTraversability()) return false;
+    //ROS_WARN("computeTraversability called2");
+    if (!traversabilityMap_.computeTraversability()) {
+      //ROS_WARN("Failed to computeTraversability");
+      return false;
+    }
   }
 
+  //ROS_DEBUG("updateTraversability exit ");
   return true;
 }
 

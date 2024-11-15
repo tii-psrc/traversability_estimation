@@ -108,6 +108,8 @@ bool StepFilter<T>::update(const T& mapIn, T& mapOut)
 
   double height, step;
 
+  //ROS_DEBUG("step filter start...");
+
   // First iteration through the elevation map.
   for (GridMapIterator iterator(mapOut); !iterator.isPastEnd(); ++iterator) {
     if (!mapOut.isValid(*iterator, "elevation"))
@@ -143,6 +145,8 @@ bool StepFilter<T>::update(const T& mapIn, T& mapOut)
       mapOut.at("step_height", *iterator) = heightMax - heightMin;
   }
 
+  //ROS_DEBUG("step filter loop 1 finished...");
+
   // Second iteration through the elevation map.
   for (GridMapIterator iterator(mapOut); !iterator.isPastEnd(); ++iterator) {
     int nCells = 0;
@@ -176,6 +180,9 @@ bool StepFilter<T>::update(const T& mapIn, T& mapOut)
       }
     }
   }
+
+  //ROS_DEBUG("step filter DONE");
+
   // Remove unnecessary layer.
   mapOut.erase("step_height");
   return true;

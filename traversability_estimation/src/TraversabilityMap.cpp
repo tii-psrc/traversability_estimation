@@ -200,6 +200,9 @@ void TraversabilityMap::resetTraversabilityFootprintLayers() {
 }
 
 bool TraversabilityMap::computeTraversability() {
+
+  //ROS_DEBUG("computeTraversability start");
+
   boost::recursive_mutex::scoped_lock scopedLockForTraversabilityMap(traversabilityMapMutex_);
   grid_map::GridMap traversabilityMapCopy = traversabilityMap_;
   scopedLockForTraversabilityMap.unlock();
@@ -211,11 +214,13 @@ bool TraversabilityMap::computeTraversability() {
   ros::WallTime start = ros::WallTime::now();
 
   if (elevationMapInitialized_) {
+    //ROS_DEBUG("updating filter chain...");
     if (!filter_chain_.update(elevationMapCopy, traversabilityMapCopy)) {
       ROS_ERROR("Traversability Estimation: Could not update the filter chain! No traversability computed!");
       traversabilityMapInitialized_ = false;
       return false;
     }
+    //ROS_DEBUG("updating filter chain DONE");
   } else {
     ROS_ERROR("Traversability Estimation: Elevation map is not initialized!");
     traversabilityMapInitialized_ = false;
