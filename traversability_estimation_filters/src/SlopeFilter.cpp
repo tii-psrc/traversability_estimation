@@ -7,7 +7,7 @@
  */
 
 #include "filters/SlopeFilter.hpp"
-#include <pluginlib/class_list_macros.h>
+#include <pluginlib/class_list_macros.hpp>
 
 // Grid Map
 #include <grid_map_ros/grid_map_ros.hpp>
@@ -34,23 +34,23 @@ template<typename T>
 bool SlopeFilter<T>::configure()
 {
   if (!FilterBase<T>::getParam(std::string("critical_value"), criticalValue_)) {
-    ROS_ERROR("SlopeFilter did not find param critical_value");
+    RCLCPP_ERROR(rclcpp::get_logger("SlopeFilter"), "SlopeFilter did not find param critical_value");
     return false;
   }
 
   if (criticalValue_ > M_PI_2 || criticalValue_ < 0.0) {
-    ROS_ERROR("Critical slope must be in the interval [0, PI/2]");
+    RCLCPP_ERROR(rclcpp::get_logger("SlopeFilter"), "Critical slope must be in the interval [0, PI/2]");
     return false;
   }
 
-  ROS_DEBUG("critical Slope = %f", criticalValue_);
+  RCLCPP_DEBUG(rclcpp::get_logger("SlopeFilter"), "critical Slope = %f", criticalValue_);
 
   if (!FilterBase<T>::getParam(std::string("map_type"), type_)) {
-    ROS_ERROR("SlopeFilter did not find param map_type");
+    RCLCPP_ERROR(rclcpp::get_logger("SlopeFilter"), "SlopeFilter did not find param map_type");
     return false;
   }
 
-  ROS_DEBUG("Slope map type = %s", type_.c_str());
+  RCLCPP_DEBUG(rclcpp::get_logger("SlopeFilter"), "Slope map type = %s", type_.c_str());
 
   return true;
 }
@@ -83,7 +83,8 @@ bool SlopeFilter<T>::update(const T& mapIn, T& mapOut)
     if (slope > slopeMax) slopeMax = slope;
   }
 
-  ROS_DEBUG("slope max = %f", slopeMax);
+  // ROS_DEBUG("slope max = %f", slopeMax);
+  RCLCPP_DEBUG(rclcpp::get_logger("SlopeFilter"), "slope max = %f", slopeMax);
 
   return true;
 }

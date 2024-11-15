@@ -13,15 +13,13 @@
 #include <algorithm>
 
 // Grid Map
-#include <grid_map_msgs/GetGridMap.h>
+#include <grid_map_msgs/srv/get_grid_map.hpp>
 #include <grid_map_core/GridMap.hpp>
 #include <grid_map_core/Polygon.hpp>
 
 // ROS
-#include <geometry_msgs/PolygonStamped.h>
-#include <geometry_msgs/Pose.h>
-#include <ros/package.h>
-#include <xmlrpcpp/XmlRpcValue.h>
+#include <geometry_msgs/msg/polygon_stamped.hpp>
+#include <geometry_msgs/msg/pose.hpp>
 
 // kindr
 #include <kindr/Core>
@@ -31,14 +29,13 @@
 #include <Eigen/Geometry>
 
 // Param IO
-#include <param_io/get_param.hpp>
 #include <traversability_estimation/TraversabilityMap.hpp>
 
 using namespace std;
 
 namespace traversability_estimation {
 
-TraversabilityMap::TraversabilityMap(ros::NodeHandle& nodeHandle)
+TraversabilityMap::TraversabilityMap(rclcpp::Node::SharedPtr& nodeHandle)
     : nodeHandle_(nodeHandle),
       traversabilityType_("traversability"),
       slopeType_("traversability_slope"),
@@ -51,18 +48,20 @@ TraversabilityMap::TraversabilityMap(ros::NodeHandle& nodeHandle)
       traversabilityMapInitialized_(false),
       checkForRoughness_(false),
       checkRobotInclination_(false) {
-  ROS_INFO("Traversability Map started.");
+  RCLCPP_INFO(nodeHandle_->get_logger(), "Traversability Map started.");
 
   readParameters();
-  traversabilityMapPublisher_ = nodeHandle_.advertise<grid_map_msgs::GridMap>("traversability_map", 1, true);
-  footprintPublisher_ = nodeHandle_.advertise<geometry_msgs::PolygonStamped>("footprint_polygon", 1, true);
-  untraversablePolygonPublisher_ = nodeHandle_.advertise<geometry_msgs::PolygonStamped>("untraversable_polygon", 1, true);
+  traversabilityMapPublisher_ = nodeHandle_->create_publisher<grid_map_msgs::msg::GridMap>("traversability_map", 1);
+  footprintPublisher_ = nodeHandle_->create_publisher<geometry_msgs::msg::PolygonStamped>("footprint_polygon", 1);
+  untraversablePolygonPublisher_ = nodeHandle_->create_publisher<geometry_msgs::msg::PolygonStamped>("untraversable_polygon", 1);
+  
 }
 
-TraversabilityMap::~TraversabilityMap() { nodeHandle_.shutdown(); }
+TraversabilityMap::~TraversabilityMap() { rclcpp::shutdown(); }
 
 bool TraversabilityMap::createLayers(bool useRawMap) {
   boost::recursive_mutex::scoped_lock scopedLockForElevationMap(elevationMapMutex_);
+  RCLCPP_INFO(nodeHandle_->get_logger(), "Creating layers.");
   elevationMapLayers_.push_back("elevation");
   if (!useRawMap) {
     elevationMapLayers_.push_back("upper_bound");
@@ -86,56 +85,74 @@ bool TraversabilityMap::createLayers(bool useRawMap) {
 }
 
 bool TraversabilityMap::readParameters() {
-  // Read footprint polygon.
-  XmlRpc::XmlRpcValue footprint;
-  if (nodeHandle_.getParam("footprint/footprint_polygon", footprint)) {
-    if (footprint.size() < 3) {
-      ROS_WARN("Footprint polygon must consist of at least 3 points. Only %i points found.", footprint.size());
-      footprintPoints_.clear();
-    } else {
-      geometry_msgs::Point32 pt;
-      pt.z = 0.0;
-      for (int i = 0; i < footprint.size(); i++) {
-        pt.x = (double)footprint[i][0];
-        pt.y = (double)footprint[i][1];
-        footprintPoints_.push_back(pt);
-      }
-    }
+  nodeHandle_->declare_parameter<std::string>("map_frame_id", "map");
+  nodeHandle_->declare_parameter<double>("footprint.traversability_default", 0.5);
+  nodeHandle_->declare_parameter<bool>("footprint.verify_roughness_footprint", false);
+  nodeHandle_->declare_parameter<bool>("footprint.verify_robot_inclination", false);
+  nodeHandle_->declare_parameter<double>("max_gap_width", 0.3);
+  nodeHandle_->declare_parameter<std::vector<double>>("footprint.footprint_polygon", std::vector<double>{});
+  std::vector<double> footprint;
+  nodeHandle_->get_parameter("footprint.footprint_polygon", footprint);
+  if (footprint.empty()) {
+    RCLCPP_WARN(nodeHandle_->get_logger(), "Traversability Map: No footprint polygon defined.");
+  } else if (footprint.size() < 6) {
+    RCLCPP_WARN(nodeHandle_->get_logger(), "Footprint polygon must consist of at least 3 points. Only %zu coordinates found.", footprint.size());
+    footprintPoints_.clear();
+  } else if (footprint.size() % 2 != 0) {
+    RCLCPP_WARN(nodeHandle_->get_logger(), "Footprint polygon must have an even number of coordinates.");
+    footprintPoints_.clear();
   } else {
-    ROS_WARN("Traversability Map: No footprint polygon defined.");
+    footprintPoints_.clear();
+    geometry_msgs::msg::Point32 pt;
+    pt.z = 0.0;
+    for (size_t i = 0; i < footprint.size(); i += 2) {
+      pt.x = footprint[i];
+      pt.y = footprint[i + 1];
+      footprintPoints_.push_back(pt);
+    }
+    for (const auto &point : footprintPoints_) {
+        RCLCPP_INFO(nodeHandle_->get_logger(), "Footprint point: (%.2f, %.2f)", point.x, point.y);
+      }
   }
-
-  mapFrameId_ = param_io::param<std::string>(nodeHandle_, "map_frame_id", "map");
-  traversabilityDefaultReadAtInit_ = param_io::param(nodeHandle_, "footprint/traversability_default", 0.5);
-  // Safety check
+  nodeHandle_->get_parameter("map_frame_id", mapFrameId_);
+  nodeHandle_->get_parameter("footprint.traversability_default", traversabilityDefaultReadAtInit_);
   traversabilityDefaultReadAtInit_ = boundTraversabilityValue(traversabilityDefaultReadAtInit_);
   setDefaultTraversabilityUnknownRegions(traversabilityDefaultReadAtInit_);
-  checkForRoughness_ = param_io::param(nodeHandle_, "footprint/verify_roughness_footprint", false);
-  checkRobotInclination_ = param_io::param(nodeHandle_, "footprint/check_robot_inclination", false);
-  maxGapWidth_ = param_io::param(nodeHandle_, "max_gap_width", 0.3);
-
-  XmlRpc::XmlRpcValue filterParameter;
-  bool filterParamsAvailable = param_io::getParam(nodeHandle_, "traversability_map_filters", filterParameter);
-  if (filterParamsAvailable) {
-    ROS_ASSERT(filterParameter.getType() == XmlRpc::XmlRpcValue::TypeArray);
-    for (int index = 0; index < filterParameter.size(); index++) {
-      if (filterParameter[index]["name"] == "stepFilter") {
-        criticalStepHeight_ = (double)filterParameter[index]["params"]["critical_value"];
-      }
-    }
-  }
-
+  nodeHandle_->get_parameter("footprint.verify_roughness_footprint", checkForRoughness_);
+  nodeHandle_->get_parameter("footprint.verify_robot_inclination", checkRobotInclination_);
+  nodeHandle_->get_parameter("max_gap_width", maxGapWidth_);
+  RCLCPP_INFO(nodeHandle_->get_logger(), "Traversability Map: Parameters read: ");
+  RCLCPP_INFO(nodeHandle_->get_logger(), "map_frame_id: %s", mapFrameId_.c_str());
+  RCLCPP_INFO(nodeHandle_->get_logger(), "footprint.traversability_default: %f", traversabilityDefaultReadAtInit_);
+  RCLCPP_INFO(nodeHandle_->get_logger(), "footprint.verify_roughness_footprint: %d", checkForRoughness_);
+  RCLCPP_INFO(nodeHandle_->get_logger(), "footprint.verify_robot_inclination: %d", checkRobotInclination_);
+  RCLCPP_INFO(nodeHandle_->get_logger(), "max_gap_width: %f", maxGapWidth_);
+  // Read filter parameters
+  RCLCPP_INFO(nodeHandle_->get_logger(), "Reading filter parameters.");
+  nodeHandle_->declare_parameter("traversability_filter_chain_parameter_name", std::string("traversability_map_filters"));
+  nodeHandle_->get_parameter("traversability_filter_chain_parameter_name", filterChainParametersName_);
+  nodeHandle_->declare_parameter<double>("traversability_map_filters.stepFilter.params.critical_value", 0.12);
+  double criticalStepHeight_;
+  nodeHandle_->get_parameter("traversability_map_filters.stepFilter.params.critical_value", criticalStepHeight_);
+  RCLCPP_INFO(nodeHandle_->get_logger(), "Critical value for step filter: %f", criticalStepHeight_);
   // Configure filter chain
-  if (!filter_chain_.configure("traversability_map_filters", nodeHandle_)) {
-    ROS_ERROR("Could not configure the filter chain!");
+  if (filter_chain_.configure(
+        filterChainParametersName_, 
+        nodeHandle_->get_node_logging_interface(), 
+        nodeHandle_->get_node_parameters_interface())) {
+    RCLCPP_DEBUG(nodeHandle_->get_logger(), "Filter chain configured");
+    return true;
   }
-  return true;
+  else {
+    RCLCPP_ERROR(nodeHandle_->get_logger(), "Could not configure the filter chain!");
+    return false;
+  }
 }
 
-bool TraversabilityMap::setElevationMap(const grid_map_msgs::GridMap& msg) {
-  if (getMapFrameId() != msg.info.header.frame_id) {
-    ROS_ERROR("Received elevation map has frame_id = '%s', but an elevation map with frame_id = '%s' is expected.",
-              msg.info.header.frame_id.c_str(), getMapFrameId().c_str());
+bool TraversabilityMap::setElevationMap(const grid_map_msgs::msg::GridMap& msg) {
+  if (getMapFrameId() != msg.header.frame_id) {
+    RCLCPP_ERROR(nodeHandle_->get_logger(), "Received elevation map has frame_id = '%s', but an elevation map with frame_id = '%s' is expected.",
+              msg.header.frame_id.c_str(), getMapFrameId().c_str());
     return false;
   }
   grid_map::GridMap elevationMap;
@@ -144,7 +161,7 @@ bool TraversabilityMap::setElevationMap(const grid_map_msgs::GridMap& msg) {
   zPosition_ = msg.info.pose.position.z;
   for (auto& layer : elevationMapLayers_) {
     if (!elevationMap.exists(layer)) {
-      ROS_WARN("Traversability Map: Can't set elevation map because there is no layer %s.", layer.c_str());
+      RCLCPP_WARN(nodeHandle_->get_logger(), "Traversability Map: Can't set elevation map because there is no layer %s.", layer.c_str());
       return false;
     }
   }
@@ -153,14 +170,14 @@ bool TraversabilityMap::setElevationMap(const grid_map_msgs::GridMap& msg) {
   return true;
 }
 
-bool TraversabilityMap::setTraversabilityMap(const grid_map_msgs::GridMap& msg) {
+bool TraversabilityMap::setTraversabilityMap(const grid_map_msgs::msg::GridMap& msg) {
   grid_map::GridMap traversabilityMap;
   grid_map::GridMapRosConverter::fromMessage(msg, traversabilityMap);
   zPosition_ = msg.info.pose.position.z;
   boost::recursive_mutex::scoped_lock scopedLockForTraversabilityMap(traversabilityMapMutex_);
   for (auto& layer : traversabilityMapLayers_) {
     if (!traversabilityMap.exists(layer)) {
-      ROS_WARN("Traversability Map: Can't set traversability map because there exists no layer %s.", layer.c_str());
+      RCLCPP_WARN(nodeHandle_->get_logger(), "Traversability Map: Can't set traversability map because there exists no layer %s.", layer.c_str());
       return false;
     }
   }
@@ -170,8 +187,7 @@ bool TraversabilityMap::setTraversabilityMap(const grid_map_msgs::GridMap& msg) 
 }
 
 void TraversabilityMap::publishTraversabilityMap() {
-  if (!traversabilityMapPublisher_.getNumSubscribers() < 1) {
-    grid_map_msgs::GridMap mapMessage;
+  if (!traversabilityMapPublisher_->get_subscription_count() < 1) {
     boost::recursive_mutex::scoped_lock scopedLockForTraversabilityMap(traversabilityMapMutex_);
     grid_map::GridMap traversabilityMapCopy = traversabilityMap_;
     scopedLockForTraversabilityMap.unlock();
@@ -179,9 +195,11 @@ void TraversabilityMap::publishTraversabilityMap() {
       traversabilityMapCopy.add("uncertainty_range", traversabilityMapCopy.get("upper_bound") - traversabilityMapCopy.get("lower_bound"));
     }
 
-    grid_map::GridMapRosConverter::toMessage(traversabilityMapCopy, mapMessage);
-    mapMessage.info.pose.position.z = zPosition_;
-    traversabilityMapPublisher_.publish(mapMessage);
+    std::unique_ptr<grid_map_msgs::msg::GridMap> mapMessage;
+    mapMessage = grid_map::GridMapRosConverter::toMessage(traversabilityMapCopy);
+    mapMessage->info.pose.position.z = zPosition_;
+    RCLCPP_DEBUG(nodeHandle_->get_logger(), "Publishing traversability map.");
+    traversabilityMapPublisher_->publish(std::move(mapMessage));
   }
 }
 
@@ -190,7 +208,8 @@ grid_map::GridMap TraversabilityMap::getTraversabilityMap() {
   return traversabilityMap_;
 }
 
-bool TraversabilityMap::traversabilityMapInitialized() { return traversabilityMapInitialized_; }
+bool TraversabilityMap::traversabilityMapInitialized() { 
+  return traversabilityMapInitialized_; }
 
 void TraversabilityMap::resetTraversabilityFootprintLayers() {
   boost::recursive_mutex::scoped_lock scopedLockForTraversabilityMap(traversabilityMapMutex_);
@@ -200,9 +219,6 @@ void TraversabilityMap::resetTraversabilityFootprintLayers() {
 }
 
 bool TraversabilityMap::computeTraversability() {
-
-  //ROS_DEBUG("computeTraversability start");
-
   boost::recursive_mutex::scoped_lock scopedLockForTraversabilityMap(traversabilityMapMutex_);
   grid_map::GridMap traversabilityMapCopy = traversabilityMap_;
   scopedLockForTraversabilityMap.unlock();
@@ -211,18 +227,17 @@ bool TraversabilityMap::computeTraversability() {
   scopedLockForElevationMap.unlock();
 
   // Initialize timer.
-  ros::WallTime start = ros::WallTime::now();
+  rclcpp::Clock system_clock(RCL_SYSTEM_TIME);
+  rclcpp::Time start = system_clock.now();
 
   if (elevationMapInitialized_) {
-    //ROS_DEBUG("updating filter chain...");
     if (!filter_chain_.update(elevationMapCopy, traversabilityMapCopy)) {
-      ROS_ERROR("Traversability Estimation: Could not update the filter chain! No traversability computed!");
+      RCLCPP_ERROR(nodeHandle_->get_logger(), "Traversability Estimation: Could not update the filter chain! No traversability computed!");
       traversabilityMapInitialized_ = false;
       return false;
     }
-    //ROS_DEBUG("updating filter chain DONE");
   } else {
-    ROS_ERROR("Traversability Estimation: Elevation map is not initialized!");
+    RCLCPP_ERROR(nodeHandle_->get_logger(), "Traversability Estimation: Elevation map is not initialized!");
     traversabilityMapInitialized_ = false;
     return false;
   }
@@ -237,7 +252,8 @@ bool TraversabilityMap::computeTraversability() {
   scopedLockForTraversabilityMap.unlock();
   publishTraversabilityMap();
 
-  ROS_DEBUG("Traversability map has been updated in %f s.", (ros::WallTime::now() - start).toSec());
+  rclcpp::Time now = system_clock.now();
+  RCLCPP_DEBUG(nodeHandle_->get_logger(), "Traversability map has been updated in %f s.", (now - start).seconds());
   return true;
 }
 
@@ -245,7 +261,9 @@ bool TraversabilityMap::traversabilityFootprint(double footprintYaw) {
   if (!traversabilityMapInitialized_) return false;
 
   // Initialize timer.
-  ros::WallTime start = ros::WallTime::now();
+  rclcpp::Clock system_clock(RCL_SYSTEM_TIME);
+  rclcpp::Time start = system_clock.now();
+
 
   boost::recursive_mutex::scoped_lock scopedLockForTraversabilityMap(traversabilityMapMutex_);
   traversabilityMap_.add("traversability_x");
@@ -254,7 +272,7 @@ bool TraversabilityMap::traversabilityFootprint(double footprintYaw) {
   grid_map::Position position;
   grid_map::Polygon polygonX, polygonRot;
 
-  ROS_DEBUG_STREAM("footprint yaw: " << footprintYaw);
+  RCLCPP_DEBUG(nodeHandle_->get_logger(), "footprint yaw: %f", footprintYaw);
   // Compute Orientation
   kindr::RotationQuaternionD xquat, rquat;
   kindr::AngleAxisD rotationAxis(footprintYaw, 0.0, 0.0, 1.0);
@@ -305,7 +323,8 @@ bool TraversabilityMap::traversabilityFootprint(double footprintYaw) {
 
   publishTraversabilityMap();
 
-  ROS_INFO("Traversability of footprint has been computed in %f s.", (ros::WallTime::now() - start).toSec());
+  rclcpp::Time now = system_clock.now();
+  RCLCPP_INFO(nodeHandle_->get_logger(), "Traversability map has been updated in %f s.", (now - start).seconds());
   return true;
 }
 
@@ -322,18 +341,19 @@ bool TraversabilityMap::traversabilityFootprint(const double& radius, const doub
   return true;
 }
 
-bool TraversabilityMap::checkFootprintPath(const traversability_msgs::FootprintPath& path,
-                                           traversability_msgs::TraversabilityResult& result, const bool publishPolygons) {
+bool TraversabilityMap::checkFootprintPath(const traversability_msgs::msg::FootprintPath& path,
+                                           traversability_msgs::msg::TraversabilityResult& result, const bool publishPolygons) {
   bool successfullyCheckedFootprint;
   if (!traversabilityMapInitialized_) {
-    ROS_WARN_THROTTLE(periodThrottledConsoleMessages, "Traversability Estimation: check Footprint path: Traversability map not yet initialized.");
+    rclcpp::Clock::SharedPtr clock = nodeHandle_->get_clock();
+    RCLCPP_WARN_THROTTLE(nodeHandle_->get_logger(), *clock, periodThrottledConsoleMessages, "Traversability Estimation: check Footprint path: Traversability map not yet initialized.");
     result.is_safe = static_cast<unsigned char>(false);
     return true;
   }
 
   const auto arraySize = path.poses.poses.size();
   if (arraySize == 0) {
-    ROS_WARN("Traversability Estimation: This path has no poses to check!");
+    RCLCPP_WARN(nodeHandle_->get_logger(), "Traversability Estimation: This path has no poses to check!");
     result.is_safe = static_cast<unsigned char>(false);
     return false;
   }
@@ -347,8 +367,8 @@ bool TraversabilityMap::checkFootprintPath(const traversability_msgs::FootprintP
   return successfullyCheckedFootprint;
 }
 
-bool TraversabilityMap::checkCircularFootprintPath(const traversability_msgs::FootprintPath& path, const bool publishPolygons,
-                                                   traversability_msgs::TraversabilityResult& result) {
+bool TraversabilityMap::checkCircularFootprintPath(const traversability_msgs::msg::FootprintPath& path, const bool publishPolygons,
+                                                   traversability_msgs::msg::TraversabilityResult& result) {
   double radius = path.radius;
   double offset = 0.15;
   grid_map::Position start, end;
@@ -378,7 +398,8 @@ bool TraversabilityMap::checkCircularFootprintPath(const traversability_msgs::Fo
       if (publishPolygons) {
         grid_map::Polygon polygon = grid_map::Polygon::fromCircle(end, radius + offset);
         polygon.setFrameId(getMapFrameId());
-        polygon.setTimestamp(ros::Time::now().toNSec());
+        rclcpp::Clock::SharedPtr clock = nodeHandle_->get_clock();
+        polygon.setTimestamp(clock->now().nanoseconds());
         publishFootprintPolygon(polygon);
         if (computeUntraversablePolygon) {
           publishUntraversablePolygon(untraversablePolygon, robotHeight);
@@ -434,7 +455,8 @@ bool TraversabilityMap::checkCircularFootprintPath(const traversability_msgs::Fo
       if (publishPolygons) {
         grid_map::Polygon polygon = grid_map::Polygon::fromCircle(end, radius + offset);
         polygon.setFrameId(getMapFrameId());
-        polygon.setTimestamp(ros::Time::now().toNSec());
+        rclcpp::Clock::SharedPtr clock = nodeHandle_->get_clock();
+        polygon.setTimestamp(clock->now().nanoseconds());
         publishFootprintPolygon(polygon);
         if (computeUntraversablePolygon) {
           untraversablePolygon.setFrameId(auxiliaryUntraversablePolygon.getFrameId());
@@ -466,8 +488,8 @@ bool TraversabilityMap::checkCircularFootprintPath(const traversability_msgs::Fo
   return true;
 }
 
-bool TraversabilityMap::checkPolygonalFootprintPath(const traversability_msgs::FootprintPath& path, const bool publishPolygons,
-                                                    traversability_msgs::TraversabilityResult& result) {
+bool TraversabilityMap::checkPolygonalFootprintPath(const traversability_msgs::msg::FootprintPath& path, const bool publishPolygons,
+                                                    traversability_msgs::msg::TraversabilityResult& result) {
   grid_map::Position start, end;
   const auto arraySize = path.poses.poses.size();
   const bool computeUntraversablePolygon = path.compute_untraversable_polygon;
@@ -480,7 +502,8 @@ bool TraversabilityMap::checkPolygonalFootprintPath(const traversability_msgs::F
 
   grid_map::Polygon polygon, polygon1, polygon2;
   polygon1.setFrameId(getMapFrameId());
-  polygon1.setTimestamp(ros::Time::now().toNSec());
+  rclcpp::Clock::SharedPtr clock = nodeHandle_->get_clock();
+  polygon1.setTimestamp(clock->now().nanoseconds());
   polygon2 = polygon1;
   for (int i = 0; i < arraySize; i++) {
     polygon1 = polygon2;
@@ -550,7 +573,8 @@ bool TraversabilityMap::checkPolygonalFootprintPath(const traversability_msgs::F
     if (arraySize > 1 && i > 0) {
       polygon = grid_map::Polygon::convexHull(polygon1, polygon2);
       polygon.setFrameId(getMapFrameId());
-      polygon.setTimestamp(ros::Time::now().toNSec());
+      rclcpp::Clock::SharedPtr clock = nodeHandle_->get_clock();
+      polygon.setTimestamp(clock->now().nanoseconds());
 
       if (checkRobotInclination_) {
         if (!checkInclination(start, end)) {
@@ -628,7 +652,7 @@ bool TraversabilityMap::isTraversable(const grid_map::Polygon& polygon, const bo
   if (pathIsTraversable) {
     // Handle cases of footprints outside of map.
     if (nCells == 0) {
-      ROS_DEBUG("TraversabilityMap: isTraversable: No cells within polygon.");
+      RCLCPP_DEBUG(nodeHandle_->get_logger(), "TraversabilityMap: isTraversable: No cells within polygon.");
       traversability = traversabilityDefault_;
       pathIsTraversable = traversabilityDefault_ != 0.0;
     } else {
@@ -643,7 +667,8 @@ bool TraversabilityMap::isTraversable(const grid_map::Polygon& polygon, const bo
       untraversablePolygon = grid_map::Polygon::monotoneChainConvexHullOfPoints(untraversablePositions);
     }
     untraversablePolygon.setFrameId(getMapFrameId());
-    untraversablePolygon.setTimestamp(ros::Time::now().toNSec());
+    rclcpp::Clock::SharedPtr clock = nodeHandle_->get_clock();
+    untraversablePolygon.setTimestamp(clock->now().nanoseconds());
   }
 
   return pathIsTraversable;
@@ -744,7 +769,8 @@ bool TraversabilityMap::isTraversable(const grid_map::Position& center, const do
 
   if (computeUntraversablePolygon) {
     untraversablePolygon.setFrameId(getMapFrameId());
-    untraversablePolygon.setTimestamp(ros::Time::now().toNSec());
+    rclcpp::Clock::SharedPtr clock = nodeHandle_->get_clock();
+    untraversablePolygon.setTimestamp(clock->now().nanoseconds());
   }
 
   return circleIsTraversable;
@@ -769,8 +795,10 @@ bool TraversabilityMap::checkInclination(const grid_map::Position& start, const 
 bool TraversabilityMap::updateFilter() {
   // Reconfigure filter chain.
   filter_chain_.clear();
-  if (!filter_chain_.configure("traversability_map_filters", nodeHandle_)) {
-    ROS_ERROR("Could not configure the filter chain!");
+  if (!filter_chain_.configure("traversability_map_filters",
+      nodeHandle_->get_node_logging_interface(),
+      nodeHandle_->get_node_parameters_interface())) {
+    RCLCPP_ERROR(nodeHandle_->get_logger(), "Could not configure the filter chain!");
     return false;
   }
   return true;
@@ -821,7 +849,7 @@ bool TraversabilityMap::checkForStep(const grid_map::Index& indexStep) {
         grid_map::Vector toCenter = center - subMapPos;
         grid_map::GridMap subMap = traversabilityMap_.getSubmap(subMapPos, subMapLength, isSuccess);
         if (!isSuccess) {
-          ROS_WARN("Traversability map: Check for step window could not retrieve submap.");
+          RCLCPP_WARN(nodeHandle_->get_logger(), "Traversability map: Check for step window could not retrieve submap.");
           traversabilityMap_.at("step_footprint", indexStep) = 0.0;
           return false;
         }
@@ -926,30 +954,32 @@ bool TraversabilityMap::checkForRoughness(const grid_map::Index& index) {
 }
 
 void TraversabilityMap::publishFootprintPolygon(const grid_map::Polygon& polygon, double zPosition) {
-  if (footprintPublisher_.getNumSubscribers() < 1) return;
-  geometry_msgs::PolygonStamped polygonMsg;
+  if (footprintPublisher_->get_subscription_count() < 1) return;
+  geometry_msgs::msg::PolygonStamped polygonMsg;
   grid_map::PolygonRosConverter::toMessage(polygon, polygonMsg);
   for (int i = 0; i < polygonMsg.polygon.points.size(); i++) {
     polygonMsg.polygon.points.at(i).z = zPosition;
   }
-  footprintPublisher_.publish(polygonMsg);
+  footprintPublisher_->publish(polygonMsg);
 }
 
 void TraversabilityMap::publishUntraversablePolygon(const grid_map::Polygon& untraversablePolygon, double zPosition) {
-  if (untraversablePolygonPublisher_.getNumSubscribers() < 1 || untraversablePolygon.nVertices() == 0) {
+  if (untraversablePolygonPublisher_->get_subscription_count() < 1 || untraversablePolygon.nVertices() == 0) {
     return;
   }
-  geometry_msgs::PolygonStamped polygonMsg;
+  geometry_msgs::msg::PolygonStamped polygonMsg;
   grid_map::PolygonRosConverter::toMessage(untraversablePolygon, polygonMsg);
   for (auto& polygon_point : polygonMsg.polygon.points) {
     polygon_point.z = static_cast<float>(zPosition);
   }
-  untraversablePolygonPublisher_.publish(polygonMsg);
+  untraversablePolygonPublisher_->publish(polygonMsg);
 }
 
-std::string TraversabilityMap::getMapFrameId() const { return mapFrameId_; }
+std::string TraversabilityMap::getMapFrameId() const { 
+  return mapFrameId_; }
 
-double TraversabilityMap::getDefaultTraversabilityUnknownRegions() const { return traversabilityDefault_; }
+double TraversabilityMap::getDefaultTraversabilityUnknownRegions() const { 
+  return traversabilityDefault_; }
 
 void TraversabilityMap::setDefaultTraversabilityUnknownRegions(const double& defaultTraversability) {
   traversabilityDefault_ = boundTraversabilityValue(defaultTraversability);
@@ -961,13 +991,11 @@ void TraversabilityMap::restoreDefaultTraversabilityUnknownRegionsReadAtInit() {
 
 double TraversabilityMap::boundTraversabilityValue(const double& traversabilityValue) const {
   if (traversabilityValue > traversabilityMaxValue) {
-    ROS_WARN("Passed traversability value (%f) is higher than max allowed value (%f). It is set equal to the max.", traversabilityValue,
-             traversabilityMaxValue);
+    RCLCPP_WARN(nodeHandle_->get_logger(), "Passed traversability value (%f) is higher than max allowed value (%f). It is set equal to the max.", traversabilityValue, traversabilityMaxValue);
     return traversabilityMaxValue;
   }
   if (traversabilityValue < traversabilityMinValue) {
-    ROS_WARN("Passed traversability value (%f) is lower than min allowed value (%f). It is set equal to the min.", traversabilityValue,
-             traversabilityMinValue);
+    RCLCPP_WARN(nodeHandle_->get_logger(), "Passed traversability value (%f) is lower than min allowed value (%f). It is set equal to the min.", traversabilityValue, traversabilityMinValue);
     return traversabilityMinValue;
   }
   return traversabilityValue;
@@ -979,8 +1007,7 @@ bool TraversabilityMap::mapHasValidTraversabilityAt(double x, double y) const {
   boost::recursive_mutex::scoped_lock scopedLockForTraversabilityMap(traversabilityMapMutex_);
   auto indexObtained = traversabilityMap_.getIndex(positionToCheck, indexToCheck);
   if (!indexObtained) {
-    ROS_ERROR("It was not possible to get index of the position (%f, %f) in the current grid_map representation of the traversability map.",
-              x, y);
+    RCLCPP_ERROR(nodeHandle_->get_logger(), "It was not possible to get index of the position (%f, %f) in the current grid_map representation of the traversability map.", x, y);
     return false;
   }
 

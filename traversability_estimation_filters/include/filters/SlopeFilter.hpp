@@ -9,8 +9,10 @@
 #ifndef SLOPEFILTER_HPP
 #define SLOPEFILTER_HPP
 
-#include <filters/filter_base.h>
-#include <ros/ros.h>
+// #include <filters/filter_base.h>
+#include <filters/filter_base.hpp>
+
+#include <rclcpp/rclcpp.hpp>
 
 #include <string>
 

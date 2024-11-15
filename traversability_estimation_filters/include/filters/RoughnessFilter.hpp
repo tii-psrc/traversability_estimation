@@ -9,7 +9,9 @@
 #ifndef ROUGHNESSFILTER_HPP
 #define ROUGHNESSFILTER_HPP
 
-#include <filters/filter_base.h>
+// #include <filters/filter_base.h>
+#include <filters/filter_base.hpp>
+
 #include <string>
 
 namespace filters {

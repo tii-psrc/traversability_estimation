@@ -7,7 +7,7 @@
  */
 
 #include "filters/RoughnessFilter.hpp"
-#include <pluginlib/class_list_macros.h>
+#include <pluginlib/class_list_macros.hpp>
 
 // Grid Map
 #include <grid_map_ros/grid_map_ros.hpp>
@@ -36,35 +36,46 @@ template<typename T>
 bool RoughnessFilter<T>::configure()
 {
   if (!FilterBase<T>::getParam(std::string("critical_value"), criticalValue_)) {
-    ROS_ERROR("RoughnessFilter did not find param critical_value");
+    // ROS_ERROR("RoughnessFilter did not find param critical_value");
+    RCLCPP_ERROR(rclcpp::get_logger("RoughnessFilter"), "RoughnessFilter did not find param critical_value");
     return false;
   }
 
   if (criticalValue_ < 0.0) {
-    ROS_ERROR("Critical roughness must be greater than zero");
+    // ROS_ERROR("Critical roughness must be greater than zero");
+    RCLCPP_ERROR(rclcpp::get_logger("RoughnessFilter"), "Critical roughness must be greater than zero");
     return false;
   }
 
-  ROS_DEBUG("Critical roughness = %f", criticalValue_);
+  // ROS_DEBUG("Critical roughness = %f", criticalValue_);
+
+  RCLCPP_DEBUG(rclcpp::get_logger("RoughnessFilter"), "Critical roughness = %f", criticalValue_);
 
   if (!FilterBase<T>::getParam(std::string("estimation_radius"), estimationRadius_)) {
-    ROS_ERROR("RoughnessFilter did not find param estimation_radius");
+    // ROS_ERROR("RoughnessFilter did not find param estimation_radius");
+    RCLCPP_ERROR(rclcpp::get_logger("RoughnessFilter"), "RoughnessFilter did not find param estimation_radius");
     return false;
   }
 
   if (estimationRadius_ < 0.0) {
-    ROS_ERROR("Roughness estimation radius must be greater than zero");
+    // ROS_ERROR("Roughness estimation radius must be greater than zero");
+    RCLCPP_ERROR(rclcpp::get_logger("RoughnessFilter"), "Roughness estimation radius must be greater than zero");
     return false;
   }
 
-  ROS_DEBUG("Roughness estimation radius = %f", estimationRadius_);
+  // ROS_DEBUG("Roughness estimation radius = %f", estimationRadius_);
+
+  RCLCPP_DEBUG(rclcpp::get_logger("RoughnessFilter"), "Roughness estimation radius = %f", estimationRadius_);
 
   if (!FilterBase<T>::getParam(std::string("map_type"), type_)) {
-    ROS_ERROR("RoughnessFilter did not find param map_type");
+    // ROS_ERROR("RoughnessFilter did not find param map_type");
+    RCLCPP_ERROR(rclcpp::get_logger("RoughnessFilter"), "RoughnessFilter did not find param map_type");
     return false;
   }
 
-  ROS_DEBUG("Roughness map type = %s", type_.c_str());
+  // ROS_DEBUG("Roughness map type = %s", type_.c_str());
+
+  RCLCPP_DEBUG(rclcpp::get_logger("RoughnessFilter"), "Roughness map type = %s", type_.c_str());
 
   return true;
 }
@@ -126,7 +137,9 @@ bool RoughnessFilter<T>::update(const T& mapIn, T& mapOut)
     if (roughness > roughnessMax) roughnessMax = roughness;
   }
 
-  ROS_DEBUG("roughness max = %f", roughnessMax);
+  // ROS_DEBUG("roughness max = %f", roughnessMax);
+
+  RCLCPP_DEBUG(rclcpp::get_logger("RoughnessFilter"), "roughness max = %f", roughnessMax);
 
   return true;
 }

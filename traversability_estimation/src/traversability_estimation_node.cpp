@@ -4,19 +4,22 @@
  *  Created on: Oct 22, 2014
  *      Author: Ralf Kaestner, Peter Fankhauser
  *   Institute: ETH Zurich, Autonomous Systems Lab
+ *   
+ *  PORTED TO ROS2 HUMBLE BY : Muhammad Ahmed
  */
 
-#include <ros/ros.h>
+#include "rclcpp/rclcpp.hpp"
 #include "traversability_estimation/TraversabilityEstimation.hpp"
 
 int main(int argc, char** argv) {
-  ros::init(argc, argv, "traversability_estimation");
-  ros::NodeHandle nodeHandle("~");
+  rclcpp::init(argc, argv);
+
+  auto nodeHandle = std::make_shared<rclcpp::Node>("traversability_estimation");
   traversability_estimation::TraversabilityEstimation traversabilityEstimation(nodeHandle);
 
   // Spin
-  ros::AsyncSpinner spinner(1);  // Use n threads. 0==num of cores
-  spinner.start();
-  ros::waitForShutdown();
+  rclcpp::spin(nodeHandle);
+  rclcpp::shutdown();
+
   return 0;
 }

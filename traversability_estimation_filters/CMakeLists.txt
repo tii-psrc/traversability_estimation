@@ -1,91 +1,72 @@
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.5)
 project(traversability_estimation_filters)
 
-set(CMAKE_CXX_FLAGS "-std=c++14 ${CMAKE_CXX_FLAGS}")
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Set the build type.  Options are:
-#  Coverage       : w/ debug symbols, w/o optimization, w/ code-coverage
-#  Debug          : w/ debug symbols, w/o optimization
-#  Release        : w/o debug symbols, w/ optimization
-#  RelWithDebInfo : w/ debug symbols, w/ optimization
-#  MinSizeRel     : w/o debug symbols, w/ optimization, stripped binaries
-#set(CMAKE_BUILD_TYPE RelWithDebInfo)
-
-## Find catkin macros and libraries
-find_package(catkin REQUIRED COMPONENTS
-  cmake_modules
-  grid_map_core
-  grid_map_ros
-  grid_map_msgs
-  filters
-)
-
-## System dependencies are found with CMake's conventions
+## Find ament macros and libraries
+find_package(ament_cmake REQUIRED)
+find_package(grid_map_core REQUIRED)
+find_package(grid_map_ros REQUIRED)
+find_package(grid_map_msgs REQUIRED)
+find_package(filters REQUIRED)
+find_package(pluginlib REQUIRED)
 find_package(Eigen3 REQUIRED)
-
-###################################
-## catkin specific configuration ##
-###################################
-## The catkin_package macro generates cmake config files for your package
-## Declare things to be passed to dependent projects
-## INCLUDE_DIRS: uncomment this if you package contains header files
-## LIBRARIES: libraries you create in this project that dependent projects also need
-## CATKIN_DEPENDS: catkin_packages dependent projects also need
-## DEPENDS: system dependencies of this project that dependent projects also need
-catkin_package(
-  INCLUDE_DIRS
-    include
-  LIBRARIES
-    ${PROJECT_NAME}
-  CATKIN_DEPENDS
-    grid_map_core
-    grid_map_ros
-    grid_map_msgs
-    filters
-#  DEPENDS Eigen
-)
-
-###########
-## Build ##
-###########
 
 ## Specify additional locations of header files
 include_directories(
   include
-  ${catkin_INCLUDE_DIRS}
-  ${Eigen_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIR}
 )
 
 ## Declare a cpp library
-add_library(${PROJECT_NAME}
-   src/SlopeFilter.cpp
-   src/StepFilter.cpp
-   src/RoughnessFilter.cpp
+add_library(${PROJECT_NAME} SHARED
+  src/SlopeFilter.cpp
+  src/StepFilter.cpp
+  src/RoughnessFilter.cpp
+)
+target_include_directories(${PROJECT_NAME} PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
 )
 
-target_link_libraries(${PROJECT_NAME}
-  ${catkin_LIBRARIES}
+ament_target_dependencies(${PROJECT_NAME}
+  grid_map_core
+  grid_map_ros
+  grid_map_msgs
+  filters
+  pluginlib
+  Eigen3
+)
+
+pluginlib_export_plugin_description_file(filters filter_plugins.xml)
+
+## Install
+install(TARGETS ${PROJECT_NAME}
+  EXPORT export_${PROJECT_NAME}
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+)
+
+install(DIRECTORY include/filters/
+  DESTINATION include/${PROJECT_NAME}/filters
 )
 
 install(FILES filter_plugins.xml
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+  DESTINATION share/${PROJECT_NAME}
 )
 
-#############
-## Install ##
-#############
-
-# all install targets should use catkin DESTINATION variables
-# See http://ros.org/doc/api/catkin/html/adv_user_guide/variables.html
-
-## Mark executables and/or libraries for installation
-install(TARGETS ${PROJECT_NAME}
-  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+ament_export_include_directories(include)
+ament_export_libraries(${PROJECT_NAME})
+ament_export_dependencies(
+  grid_map_core
+  grid_map_ros
+  grid_map_msgs
+  filters
+  pluginlib
+  Eigen3
 )
+ament_export_targets(export_${PROJECT_NAME})
 
-## Mark cpp header files for installation
-install(DIRECTORY include/filters/
-  DESTINATION ${CATKIN_GLOBAL_INCLUDE_DESTINATION}/filters
-)
+ament_package()

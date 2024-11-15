@@ -1,134 +1,123 @@
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.5)
 project(traversability_estimation)
 
-set(CMAKE_CXX_FLAGS "-std=c++14 ${CMAKE_CXX_FLAGS}")
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Set the build type.  Options are:
-#  Coverage       : w/ debug symbols, w/o optimization, w/ code-coverage
-#  Debug          : w/ debug symbols, w/o optimization
-#  Release        : w/o debug symbols, w/ optimization
-#  RelWithDebInfo : w/ debug symbols, w/ optimization
-#  MinSizeRel     : w/o debug symbols, w/ optimization, stripped binaries
-#set(CMAKE_BUILD_TYPE RelWithDebInfo)
-
-## Find catkin macros and libraries
-find_package(catkin REQUIRED COMPONENTS
-  cmake_modules
-  grid_map_ros
-  grid_map_core
-  grid_map_msgs
-  grid_map_filters
-  roscpp
-  tf
-  tf_conversions
-  traversability_estimation_filters
-  traversability_msgs
-  std_msgs
-  geometry_msgs
-  sensor_msgs
-  param_io
-  xmlrpcpp
-)
-
-## System dependencies are found with CMake's conventions
+## Find ament macros and libraries
+find_package(ament_cmake REQUIRED)
+find_package(grid_map_ros REQUIRED)
+find_package(grid_map_core REQUIRED)
+find_package(grid_map_msgs REQUIRED)
+find_package(grid_map_filters REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
+find_package(tf2_eigen REQUIRED)
+find_package(traversability_estimation_filters REQUIRED)
+find_package(traversability_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
+find_package(filters REQUIRED)
+# find_package(param_io QUIET) 
 find_package(Eigen3 REQUIRED)
 find_package(kindr QUIET)
 find_package(PkgConfig REQUIRED)
 if(NOT kindr_FOUND)
-  # Attempt to find package-based kindr
   pkg_check_modules(kindr kindr REQUIRED)
 endif()
 
-
-###################################
-## catkin specific configuration ##
-###################################
-## The catkin_package macro generates cmake config files for your package
-## Declare things to be passed to dependent projects
-## INCLUDE_DIRS: uncomment this if you package contains header files
-## LIBRARIES: libraries you create in this project that dependent projects also need
-## CATKIN_DEPENDS: catkin_packages dependent projects also need
-## DEPENDS: system dependencies of this project that dependent projects also need
-catkin_package(
-  INCLUDE_DIRS
-    include
-  LIBRARIES ${PROJECT_NAME} ${Eigen_INCLUDE_DIRS}
-  CATKIN_DEPENDS
-    grid_map_ros
-    grid_map_core
-    grid_map_msgs
-    grid_map_filters
-    roscpp
-    tf
-    tf_conversions
-    traversability_estimation_filters
-    traversability_msgs
-    std_msgs
-    geometry_msgs
-    sensor_msgs
-    param_io
-    xmlrpcpp
-#  DEPENDS Eigen
-)
-
-###########
-## Build ##
-###########
-
 ## Specify additional locations of header files
-## Your package locations should be listed before other locations
 include_directories(
   include
-  ${catkin_INCLUDE_DIRS}
   ${Eigen_INCLUDE_DIRS}
   ${kindr_INCLUDE_DIRS}
 )
 
 ## Declare a cpp library
-add_library(
-  ${PROJECT_NAME}
+add_library(${PROJECT_NAME} SHARED
   src/TraversabilityMap.cpp
 )
 
-target_link_libraries(
-  ${PROJECT_NAME}
-  ${catkin_LIBRARIES}
+ament_target_dependencies(${PROJECT_NAME}
+  grid_map_ros
+  grid_map_core
+  grid_map_msgs
+  grid_map_filters
+  rclcpp
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
+  tf2_eigen
+  traversability_estimation_filters
+  traversability_msgs
+  std_msgs
+  geometry_msgs
+  sensor_msgs
+  std_srvs
+  Eigen3
+  kindr
+  filters
+  # param_io 
 )
 
 ## Declare a cpp executable
-add_executable(
-  ${PROJECT_NAME}_node
+add_executable(${PROJECT_NAME}_node
   src/traversability_estimation_node.cpp
   src/TraversabilityEstimation.cpp
 )
 
-## Specify libraries to link a library or executable target against
-target_link_libraries(
-  ${PROJECT_NAME}_node
-  ${catkin_LIBRARIES}
+
+target_link_libraries(${PROJECT_NAME}_node
   ${PROJECT_NAME}
 )
 
-#############
-## Install ##
-#############
-
-# all install targets should use catkin DESTINATION variables
-# See http://ros.org/doc/api/catkin/html/adv_user_guide/variables.html
-
-## Mark executables and/or libraries for installation
-install(TARGETS ${PROJECT_NAME} ${PROJECT_NAME}_node
-  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+## Install targets
+install(TARGETS ${PROJECT_NAME}
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
 )
 
-## Mark cpp header files for installation
+## Install targets
+install(TARGETS ${PROJECT_NAME}_node
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+## Install include directories
 install(DIRECTORY include/${PROJECT_NAME}/
-  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
+  DESTINATION include/${PROJECT_NAME}
 )
 
-## Mark other files for installation (e.g. launch and bag files, etc.)
+## Install other files (e.g. launch and config files)
 install(DIRECTORY config launch maps
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+  DESTINATION share/${PROJECT_NAME}
 )
+
+ament_export_include_directories(include)
+ament_export_libraries(${PROJECT_NAME})
+ament_export_dependencies(
+  grid_map_ros
+  grid_map_core
+  grid_map_msgs
+  grid_map_filters
+  rclcpp
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
+  tf2_eigen
+  traversability_estimation_filters
+  traversability_msgs
+  std_msgs
+  std_srvs
+  geometry_msgs
+  sensor_msgs
+  Eigen3
+  kindr
+  # param_io 
+)
+
+ament_package()

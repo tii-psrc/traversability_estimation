@@ -9,7 +9,8 @@
 #ifndef STEPFILTER_HPP
 #define STEPFILTER_HPP
 
-#include <filters/filter_base.h>
+// #include <filters/filter_base.h>
+#include <filters/filter_base.hpp>
 
 #include <string>
 
